@@ -4,18 +4,24 @@ use futures_util::StreamExt;
 async fn test_pipe() {
     let mut pipe = Pipe::new();
 
-    pipe.write(1).await;
+    pipe.send(1);
 
     let mut recv = pipe.clone();
 
     let next = recv.next().await;
 
-    assert_eq!(next, Some(Some(1)));
+    assert_eq!(next, Some(1));
 
-    pipe.write(2).await;
-    recv.write(3).await;
+    pipe.send(2);
+    recv.send(3);
 
     let next = pipe.next().await;
 
-    assert_eq!(next, Some(Some(3)));
+    assert_eq!(next, Some(3));
+
+    pipe.finish();
+
+    let next = recv.next().await;
+
+    assert_eq!(next, None);
 }

@@ -1,5 +1,5 @@
-use async_lock::Mutex;
-use futures_util::{ready, stream::Stream, Future};
+use futures_util::stream::Stream;
+use parking_lot::Mutex;
 /// Pipe is a stream which can be used to pipe data
 /// from one end and read it from the other end.
 /// this is a lot like the 'pipe' method in Node.js
@@ -32,14 +32,14 @@ impl<T> Pipe<T> {
         Self(Arc::new(Mutex::new(TwoWayStream::new())))
     }
 
-    pub async fn write(&mut self, data: T) {
-        let mut lock = self.0.lock().await;
+    pub fn send(&mut self, data: T) {
+        let mut lock = self.0.lock();
         lock.data = Some(data);
         (*lock).wake_up_reader();
     }
 
-    pub async fn finish(&mut self) {
-        let mut lock = self.0.lock().await;
+    pub fn finish(&mut self) {
+        let mut lock = self.0.lock();
         (*lock).finish();
     }
 }
@@ -51,10 +51,10 @@ impl<T> Clone for Pipe<T> {
 }
 
 impl<T: Unpin> Stream for Pipe<T> {
-    type Item = Option<T>;
+    type Item = T;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let mut lock = ready!(Pin::new(&mut self.0.lock()).poll(cx));
+        let mut lock = self.0.lock();
         Pin::new(&mut *lock).poll_next(cx)
     }
 }
@@ -94,15 +94,15 @@ impl<T> TwoWayStream<T> {
 }
 
 impl<T: Unpin> Stream for TwoWayStream<T> {
-    type Item = Option<T>;
+    type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         if self.reader_waker.is_none() {
             self.reader_waker = Some(cx.waker().clone());
         }
 
-        // this marks the end of the stream
         if self.data.is_none() {
+            // this marks the end of the stream
             if self.is_finished {
                 return Poll::Ready(None);
             }
@@ -111,6 +111,9 @@ impl<T: Unpin> Stream for TwoWayStream<T> {
         }
 
         // we have some data in the buffer
-        Poll::Ready(Some(self.data.take()))
+        // the following should always  return Poll::Ready(Some(_))
+        // because if it returns Poll::Ready(None) then the stream is finished which
+        // isn't true
+        Poll::Ready(self.data.take())
     }
 }
